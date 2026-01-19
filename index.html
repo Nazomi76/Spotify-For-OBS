@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify For OBS</title>
+    <style>
+        body { background: #181818; color: #eee; font-family: sans-serif; margin: 0; padding: 0; line-height: 1.6; }
+        
+        /* 全体のレイアウト */
+        .page-wrapper {
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        /* 左右の広告スペース */
+        .ad-container {
+            width: 160px;
+            flex-shrink: 0;
+            padding: 20px 10px;
+            background-color: #121212;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        @media (min-width: 1200px) {
+            .ad-container { display: flex; }
+        }
+
+        /* メインコンテンツ */
+        .main-content {
+            flex: 1;
+            max-width: 850px;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+
+        h1 { border-bottom: 2px solid #1DB954; padding-bottom: 10px; margin-bottom: 20px; color: #1DB954; }
+        .card { background: #282828; padding: 25px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        
+        .config-container { display: flex; gap: 30px; flex-wrap: wrap; }
+        .config-column { flex: 1; min-width: 280px; }
+        
+        label { display: block; margin-top: 15px; font-weight: bold; font-size: 0.9em; color: #ccc; margin-bottom: 5px; }
+        select, input[type="color"], input[type="range"] { width: 100%; background: #3e3e3e; color: white; border: 1px solid #555; border-radius: 6px; padding: 10px; box-sizing: border-box; outline: none; }
+        
+        .radio-group { display: flex; gap: 15px; margin-top: 5px; }
+        .radio-group label { margin: 0; font-weight: normal; cursor: pointer; display: flex; align-items: center; background: #333; padding: 8px 12px; border-radius: 20px; transition: 0.2s; }
+        input[type="radio"] { margin-right: 8px; transform: scale(1.2); accent-color: #1DB954; }
+        .range-val { float: right; color: #1DB954; font-family: monospace; }
+
+        .btn-spotify { background: #1DB954; color: white; border: none; padding: 15px; border-radius: 30px; cursor: pointer; font-weight: bold; width: 100%; font-size: 16px; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;}
+        .btn-spotify:hover { background: #1ed760; transform: translateY(-2px); }
+
+        .footer-buttons { display: flex; justify-content: flex-end; gap: 15px; margin-top: 20px; border-top: 1px solid #444; padding-top: 20px; }
+        .btn-logout { background: #444; color: #fff; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        .btn-reset { background: #8B0000; color: #fff; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+
+        #obs-url-box { background: #0a0a0a; padding: 15px; border-radius: 8px; border: 2px solid #1DB954; margin-top: 10px; cursor: pointer; position: relative; }
+        #obs-url { color: #0f0; word-break: break-all; font-family: monospace; font-size: 13px; max-height: 80px; overflow-y: auto; }
+        .copy-hint { position: absolute; top: -12px; right: 15px; background: #1DB954; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.75em; font-weight: bold; }
+        .hidden { display: none; }
+        .sub-option { margin-left: 15px; padding-left: 15px; border-left: 2px solid #444; margin-top: 10px; }
+
+        .warning-box { background: #4a3b00; border-left: 5px solid #ffcc00; padding: 15px; margin-bottom: 25px; border-radius: 4px; }
+        .warning-box strong { color: #ffcc00; display: block; margin-bottom: 5px; font-size: 1.1em; }
+        .warning-box p { margin: 0; font-size: 0.95em; color: #ddd; }
+
+        .help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px; }
+        .help-box { padding: 15px; border-radius: 6px; font-size: 0.9em; line-height: 1.6; }
+        .help-box.blue { background: #2a4060; border-left: 5px solid #61dafb; }
+        .help-box.red { background: #4a2a2a; border-left: 5px solid #ff5555; }
+        .help-box strong { display: block; margin-bottom: 8px; font-size: 1.1em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;}
+        .help-box strong.blue-t { color: #61dafb; } .help-box strong.red-t { color: #ff5555; }
+
+        /* クレジット footer */
+        .credit-footer {
+            margin-top: 40px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #666;
+            padding-bottom: 20px;
+        }
+        /* リンクのスタイル */
+        .credit-footer a {
+            color: #1DB954;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        .credit-footer a:hover {
+            color: #fff;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-wrapper">
+    <div class="ad-container left">
+        <span style="color:#555; font-size:0.8em; margin-bottom:10px;">Advertisement</span>
+        <div style="width:160px; height:600px; background:#222; display:flex; align-items:center; justify-content:center; color:#444;">
+            160x600<br>Ad Space
+        </div>
+    </div>
+
+    <div class="main-content">
+        <h1>Spotify For OBS</h1>
+
+        <div id="login-section" class="card">
+            <h3>1. Spotify連携</h3>
+            <p>Spotifyアカウントで認証を行ってください。</p>
+            <button class="btn-spotify" onclick="startAuth()">Spotifyでログイン</button>
+        </div>
+
+        <div id="config-section" class="card hidden">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h3>2. デザイン設定</h3>
+                <span style="color:#1DB954; font-weight:bold; font-size:0.9em;">● 認証済み</span>
+            </div>
+
+            <div class="warning-box">
+                <strong>⚠️ 設定変更時の注意</strong>
+                <p>
+                    設定を変更するとURLが無効になり「Connecting...」や「Auth Error」となる場合があります。<br>
+                    もし表示されなくなった場合は、画面下の<strong>「設定を保持してログアウト」</strong>を押し、再度ログインしてから新しいURLをOBSに貼り直してください。<br>
+                    また、バグのような挙動があれば気軽にX(旧Twitter)のDMまで詳細と一緒にお送りください。<br>
+                    <div class="credit-footer">
+                        ↓XのID↓<strong><a href="https://x.com/Nazomi76" target="_blank" rel="noopener noreferrer">@Nazomi76</a></strong>
+                    </div>
+                </p>
+            </div>
+            
+            <div class="config-container">
+                <div class="config-column">
+                    <label>レイアウト</label>
+                    <select id="layout">
+                        <option value="row">左にジャケット</option>
+                        <option value="row-reverse">右にジャケット</option>
+                        <option value="column">上にジャケット (縦型)</option>
+                    </select>
+
+                    <label>ジャケット表示</label>
+                    <select id="showArt">
+                        <option value="true">表示する</option>
+                        <option value="false">表示しない</option>
+                    </select>
+
+                    <label>アニメーション</label>
+                    <select id="anim">
+                        <option value="fade">フェード (Fade)</option>
+                        <option value="slide">スライド (Slide)</option>
+                    </select>
+
+                    <div id="slide-options" class="sub-option hidden">
+                        <label>スライド方向 (退場時)</label>
+                        <select id="slideDir">
+                            <option value="left">左へ流れる</option>
+                            <option value="right">右へ流れる</option>
+                            <option value="up">上へ流れる</option>
+                            <option value="down">下へ流れる</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="config-column">
+                    <label>背景モード</label>
+                    <div class="radio-group">
+                        <label><input type="radio" name="bgType" value="auto" checked> 自動</label>
+                        <label><input type="radio" name="bgType" value="custom"> 指定色</label>
+                        <label><input type="radio" name="bgType" value="none"> なし</label>
+                    </div>
+
+                    <div id="color-picker-wrapper" class="sub-option hidden">
+                        <label>背景色</label>
+                        <input type="color" id="bgColorPicker" value="#000000" style="height: 40px;">
+                    </div>
+
+                    <label style="margin-top: 20px;">背景の濃さ <span id="opacityVal" class="range-val">60%</span></label>
+                    <input type="range" id="bgOpacity" min="0" max="100" value="60">
+                </div>
+            </div>
+
+            <div style="margin-top: 30px;">
+                <label style="border-top: 1px solid #444; padding-top: 15px;">OBS ブラウザソース用 URL</label>
+                <div id="obs-url-box" onclick="copyUrl()">
+                    <span class="copy-hint">CLICK TO COPY</span>
+                    <div id="obs-url">生成中...</div>
+                </div>
+            </div>
+            
+            <div class="footer-buttons">
+                <button class="btn-logout" onclick="logoutKeepSettings()">設定を保持してログアウト (再連携)</button>
+                <button class="btn-reset" onclick="fullReset()">全設定リセット</button>
+            </div>
+        </div>
+
+        <div class="help-grid">
+            <div class="help-box blue">
+                <strong class="blue-t">📊 アナライザーが動かない</strong>
+                <ol>
+                    <li>ソースをダブルクリック→<strong>「OBSの音声を制御する」</strong>にチェック。</li>
+                    <li>ソースを右クリック→「対話 (Interact)」→画面をクリック。</li>
+                </ol>
+            </div>
+            <div class="help-box red">
+                <strong class="red-t">🎨 黒い背景が消えない</strong>
+                「カスタムCSS」欄を全て消し、以下を貼ってください：
+                <div style="margin-top:5px; background:rgba(0,0,0,0.5); padding:5px; border-radius:4px; font-size:0.8em; cursor:pointer;" onclick="navigator.clipboard.writeText(this.innerText); alert('コピーしました');">body { background-color: rgba(0, 0, 0, 0) !important; margin: 0px auto; overflow: hidden; }
+    html { background-color: rgba(0, 0, 0, 0) !important; }</div>
+            </div>
+        </div>
+
+        <div class="credit-footer">
+            Created by <strong><a href="https://x.com/Nazomi76" target="_blank" rel="noopener noreferrer">@Nazomi76</a></strong>
+        </div>
+
+    </div>
+
+    <div class="ad-container right">
+        <span style="color:#555; font-size:0.8em; margin-bottom:10px;">Advertisement</span>
+        <div style="width:160px; height:600px; background:#222; display:flex; align-items:center; justify-content:center; color:#444;">
+            160x600<br>Ad Space
+        </div>
+    </div>
+</div>
+
+<script>
+    // ★★★ CLIENT ID (ここにあなたのID) ★★★
+    const CLIENT_ID = '457a4c52b2894ff18cf119bae10a9b36'; 
+    
+    const REDIRECT_URI = window.location.href.split('?')[0].split('#')[0];
+    const SCOPES = "user-read-currently-playing user-read-playback-state";
+
+    window.onload = async () => {
+        loadSettings(); 
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        if (code) { await handleCallback(code); } 
+        else if (localStorage.getItem('refresh_token')) { showConfig(); }
+        toggleSlideOptions(); toggleColorPicker();
+    };
+
+    document.querySelectorAll('select, input').forEach(el => {
+        el.addEventListener('input', () => { saveSettings(); updateUrl(); });
+    });
+
+    document.getElementById('anim').addEventListener('change', toggleSlideOptions);
+    function toggleSlideOptions() {
+        document.getElementById('slide-options').classList.toggle('hidden', document.getElementById('anim').value !== 'slide');
+    }
+
+    document.querySelectorAll('input[name="bgType"]').forEach(r => r.addEventListener('change', toggleColorPicker));
+    function toggleColorPicker() {
+        document.getElementById('color-picker-wrapper').classList.toggle('hidden', document.querySelector('input[name="bgType"]:checked').value !== 'custom');
+        updateUrl();
+    }
+
+    document.getElementById('bgOpacity').addEventListener('input', (e) => {
+        document.getElementById('opacityVal').innerText = e.target.value + '%';
+    });
+
+    function saveSettings() {
+        const s = {
+            layout: document.getElementById('layout').value,
+            showArt: document.getElementById('showArt').value,
+            anim: document.getElementById('anim').value,
+            slideDir: document.getElementById('slideDir').value,
+            bgType: document.querySelector('input[name="bgType"]:checked').value,
+            bgColor: document.getElementById('bgColorPicker').value,
+            opacity: document.getElementById('bgOpacity').value
+        };
+        localStorage.setItem('obs_spotify_config', JSON.stringify(s));
+    }
+
+    function loadSettings() {
+        const saved = localStorage.getItem('obs_spotify_config');
+        if (saved) {
+            try {
+                const s = JSON.parse(saved);
+                if(s.layout) document.getElementById('layout').value = s.layout;
+                if(s.showArt) document.getElementById('showArt').value = s.showArt;
+                if(s.anim) document.getElementById('anim').value = s.anim;
+                if(s.slideDir) document.getElementById('slideDir').value = s.slideDir;
+                if(s.bgType) {
+                    const r = document.querySelector(`input[name="bgType"][value="${s.bgType}"]`);
+                    if(r) r.checked = true;
+                }
+                if(s.bgColor) document.getElementById('bgColorPicker').value = s.bgColor;
+                if(s.opacity) {
+                    document.getElementById('bgOpacity').value = s.opacity;
+                    document.getElementById('opacityVal').innerText = s.opacity + '%';
+                }
+            } catch(e) {}
+        }
+    }
+
+    async function startAuth() {
+        const codeVerifier = generateRandomString(128);
+        const challenge = await generateCodeChallenge(codeVerifier);
+        localStorage.setItem('verifier', codeVerifier);
+        const authUrl = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}&code_challenge_method=S256&code_challenge=${challenge}`;
+        window.location.href = authUrl;
+    }
+
+    async function handleCallback(code) {
+        const verifier = localStorage.getItem('verifier');
+        const body = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: REDIRECT_URI, client_id: CLIENT_ID, code_verifier: verifier });
+        try {
+            const res = await fetch('https://accounts.spotify.com/api/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+            const data = await res.json();
+            if(data.refresh_token) {
+                localStorage.setItem('refresh_token', data.refresh_token);
+                window.history.replaceState({}, document.title, window.location.pathname);
+                showConfig();
+            } else { alert("認証失敗: " + (data.error_description || JSON.stringify(data))); }
+        } catch(e) { alert("通信エラー: " + e); }
+    }
+
+    function updateUrl() {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if(!refreshToken) {
+            document.getElementById('obs-url').innerText = "ログインが必要です";
+            return;
+        }
+        const layout = document.getElementById('layout').value;
+        const showArt = document.getElementById('showArt').value;
+        const anim = document.getElementById('anim').value;
+        const slideDir = document.getElementById('slideDir').value;
+        const opacity = document.getElementById('bgOpacity').value;
+        let bgParam = document.querySelector('input[name="bgType"]:checked').value;
+        if (bgParam === 'custom') bgParam = document.getElementById('bgColorPicker').value.replace('#', '');
+
+        const baseUrl = window.location.href.substring(0, window.location.href.lastIndexOf('/')) + '/overlay.html';
+        const encodedToken = encodeURIComponent(refreshToken); // 安全のためエンコード
+        const url = `${baseUrl}?layout=${layout}&showArt=${showArt}&anim=${anim}&slideDir=${slideDir}&bg=${bgParam}&op=${opacity}&ref=${encodedToken}`;
+        document.getElementById('obs-url').innerText = url;
+    }
+
+    function showConfig() {
+        document.getElementById('login-section').classList.add('hidden');
+        document.getElementById('config-section').classList.remove('hidden');
+        updateUrl();
+    }
+
+    function logoutKeepSettings() {
+        localStorage.removeItem('refresh_token');
+        location.reload();
+    }
+
+    function fullReset() {
+        if(confirm("全設定を削除して初期化しますか？")) {
+            localStorage.clear();
+            location.reload();
+        }
+    }
+
+    function copyUrl() {
+        const text = document.getElementById('obs-url').innerText;
+        if(text && text.startsWith('http')) {
+            navigator.clipboard.writeText(text).then(() => alert('URLをコピーしました'));
+        }
+    }
+
+    function generateRandomString(l){let t='',p='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';for(let i=0;i<l;i++)t+=p.charAt(Math.floor(Math.random()*p.length));return t;}
+    async function generateCodeChallenge(v){
+        const e=new TextEncoder();
+        const d=await window.crypto.subtle.digest('SHA-256',e.encode(v));
+        return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/, '');
+    }
+</script>
+</body>
+</html>

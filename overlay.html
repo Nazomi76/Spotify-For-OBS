@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Spotify Overlay</title>
+    <style>
+        :root {
+            --text-color: #fff;
+            --accent: #1DB954;
+            --card-height: 120px;
+            --card-width: 420px;
+            --font-main: 'Helvetica Neue', Arial, sans-serif;
+            --out-x: 0px; --out-y: 0px; --in-x: 0px;  --in-y: 0px;
+        }
+
+        html, body { 
+            margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; 
+            background-color: transparent !important; background: none !important;
+        }
+
+        body { display: flex; align-items: flex-end; padding: 20px; box-sizing: border-box; }
+
+        .player-card {
+            display: flex; align-items: center; gap: 15px;
+            background-color: transparent; 
+            box-shadow: none; backdrop-filter: none;
+            padding: 10px; border-radius: 12px;
+            height: var(--card-height); width: var(--card-width); box-sizing: border-box;
+            opacity: 1; transform: translate(0, 0);
+            transition: background-color 0.5s ease, backdrop-filter 0.5s ease, box-shadow 0.5s ease, transform 0.6s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.5s ease;
+        }
+
+        .player-card.hidden { opacity: 0; display: none; }
+
+        .player-card.exiting {
+            opacity: 1; 
+            transform: translate(var(--out-x), var(--out-y));
+            transition: transform 0.5s cubic-bezier(0.55, 0.055, 0.675, 0.19);
+        }
+        .player-card.preparing {
+            opacity: 0;
+            transform: translate(var(--in-x), var(--in-y));
+            transition: none !important;
+        }
+        .player-card.entering {
+            opacity: 1;
+            transform: translate(0, 0);
+            transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+        }
+        .player-card.anim-fade.exiting { transform: translate(0,0); opacity: 0; transition: opacity 0.5s ease; }
+
+        .player-card.row { flex-direction: row; }
+        .player-card.row-reverse { flex-direction: row-reverse; text-align: right; }
+        .player-card.row-reverse .info { align-items: flex-end; }
+        .player-card.column { flex-direction: column; height: auto; width: 220px; padding: 20px 15px; text-align: center; }
+        .player-card.column .art-wrapper { height: 180px; width: 180px; }
+        .player-card.column .info { width: 100%; align-items: center; }
+
+        .art-wrapper {
+            position: relative; height: 100%; aspect-ratio: 1 / 1; border-radius: 8px; overflow: hidden; flex-shrink: 0;
+            background: transparent; box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+        }
+        .art-wrapper img { width: 100%; height: 100%; object-fit: cover; }
+        #visualizer { position: absolute; bottom: 0; left: 0; width: 100%; height: 50%; opacity: 0.8; mix-blend-mode: screen; pointer-events: none;}
+
+        .info { 
+            color: var(--text-color); text-shadow: 0 1px 3px rgba(0,0,0,0.8); 
+            flex: 1; display: flex; flex-direction: column; justify-content: center; 
+            min-width: 0; overflow: hidden;
+        }
+
+        .text-container { width: 100%; white-space: nowrap; overflow: hidden; position: relative; }
+        .scrolling-text { display: inline-block; white-space: nowrap; padding-right: 20px; }
+        .marquee { animation: scroll-left var(--dur) linear infinite; }
+        @keyframes scroll-left { 
+            0% { transform: translateX(0); } 
+            100% { transform: translateX(var(--dist)); } 
+        }
+
+        .title { font-size: 22px; font-weight: bold; margin-bottom: 4px; }
+        .artist { font-size: 15px; opacity: 0.85; margin-bottom: 8px; }
+
+        .progress-wrapper { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 2px; }
+        .time-text { font-size: 11px; font-family: monospace; opacity: 0.8; min-width: 35px; }
+        .progress-bg { flex: 1; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden; }
+        .progress-bar { height: 100%; background: var(--accent); width: 0%; transition: width 0.5s linear; }
+        .error-msg { color: #ff5555; font-weight: bold; font-size: 0.8em; }
+        #audio-start-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999; display: none; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="audio-start-overlay" onclick="resumeAudio()"></div>
+    <div id="playerCard" class="player-card">
+        <div class="art-wrapper" id="artBox">
+            <img id="albumArt" src="" alt="" crossorigin="anonymous">
+            <canvas id="visualizer"></canvas>
+        </div>
+        <div class="info track-info">
+            <div class="text-container" id="titleContainer"><div class="scrolling-text title" id="trackTitle">Connecting...</div></div>
+            <div class="text-container" id="artistContainer"><div class="scrolling-text artist" id="trackArtist">Please wait</div></div>
+            <div class="progress-wrapper">
+                <div class="time-text" id="currentTime">0:00</div>
+                <div class="progress-bg"><div class="progress-bar" id="progressBar"></div></div>
+                <div class="time-text" id="totalTime">0:00</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        // ★★★ CLIENT ID (ここにあなたのID) ★★★
+        const CLIENT_ID = '457a4c52b2894ff18cf119bae10a9b36'; 
+
+        const params = new URLSearchParams(window.location.search);
+        const playerCard = document.getElementById('playerCard');
+        const imgEl = document.getElementById('albumArt');
+        const rootStyle = document.documentElement.style;
+        
+        playerCard.classList.add(params.get('layout') || 'row');
+        if(params.get('showArt') === 'false') document.getElementById('artBox').style.display = 'none';
+
+        const animType = params.get('anim') || 'fade';
+        const slideDir = params.get('slideDir') || 'left';
+        playerCard.classList.add(`anim-${animType}`);
+
+        if(animType === 'slide') {
+            const dist = '480px'; 
+            switch(slideDir) {
+                case 'left':  rootStyle.setProperty('--out-x', `-${dist}`); rootStyle.setProperty('--in-x', dist); break;
+                case 'right': rootStyle.setProperty('--out-x', dist); rootStyle.setProperty('--in-x', `-${dist}`); break;
+                case 'up':    rootStyle.setProperty('--out-y', `-${dist}`); rootStyle.setProperty('--in-y', dist); break;
+                case 'down':  rootStyle.setProperty('--out-y', dist); rootStyle.setProperty('--in-y', `-${dist}`); break;
+            }
+        }
+
+        const bgParam = params.get('bg'); 
+        const opacity = (params.get('op') || 60) / 100;
+        let isAutoBg = (bgParam === 'auto');
+
+        function updateBackground(rgbArray) {
+            playerCard.style.backgroundColor = 'transparent';
+            playerCard.style.boxShadow = 'none';
+            if (bgParam === 'none') return;
+
+            let color = null;
+            if(rgbArray) {
+                color = `${rgbArray[0]}, ${rgbArray[1]}, ${rgbArray[2]}`;
+            } else if (!isAutoBg && bgParam) {
+                const r = parseInt(bgParam.substring(0, 2), 16);
+                const g = parseInt(bgParam.substring(2, 4), 16);
+                const b = parseInt(bgParam.substring(4, 6), 16);
+                color = `${r}, ${g}, ${b}`;
+            }
+
+            if (color) {
+                playerCard.style.backgroundColor = `rgba(${color}, ${opacity})`;
+                playerCard.style.boxShadow = `0 4px 20px rgba(${color}, 0.3)`; 
+            }
+        }
+        updateBackground(null);
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 1; canvas.height = 1;
+        imgEl.onload = () => {
+            if (!isAutoBg) return;
+            try {
+                ctx.drawImage(imgEl, 0, 0, 1, 1);
+                const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+                updateBackground([r, g, b]);
+            } catch(e) { updateBackground(null); }
+        };
+
+        function msToTime(ms) {
+            const s = Math.floor(ms / 1000);
+            return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+        }
+
+        function applyMarquee(el, container) {
+            el.style.animation = 'none';
+            el.classList.remove('marquee');
+            el.style.transform = 'translateX(0)';
+            
+            // 幅計測
+            const contentWidth = el.scrollWidth;
+            const containerWidth = container.clientWidth;
+
+            if (contentWidth > containerWidth) {
+                const dist = contentWidth - containerWidth + 20;
+                const duration = dist / 30 + 4; // 秒数
+                
+                el.style.setProperty('--dist', `-${dist}px`);
+                el.style.setProperty('--dur', `${duration}s`);
+                
+                // 次の描画タイミングでクラス付与
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        el.classList.add('marquee');
+                    });
+                });
+            }
+        }
+
+        const refreshToken = params.get('ref');
+        let accessToken = null;
+        let tokenExpiry = 0;
+
+        const timeoutTimer = setTimeout(() => {
+            const title = document.getElementById('trackTitle').innerText;
+            if(title === "Connecting...") {
+                document.getElementById('trackTitle').innerHTML = "<span class='error-msg'>Waiting...</span>";
+                document.getElementById('trackArtist').innerText = "Play music";
+            }
+        }, 5000);
+
+        async function getAccessToken() {
+            try {
+                const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID });
+                // ★修正: 公式URL
+                const res = await fetch('https://accounts.spotify.com/api/token', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body });
+                const data = await res.json();
+                
+                if(data.error) {
+                    document.getElementById('trackTitle').innerHTML = "<span class='error-msg'>Auth Error</span>";
+                    document.getElementById('trackArtist').innerText = "Token無効・再連携してください";
+                    playerCard.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                    return false;
+                }
+                
+                if(data.access_token) {
+                    accessToken = data.access_token;
+                    tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000;
+                    return true;
+                }
+            } catch(e) { console.error(e); }
+            return false;
+        }
+
+        let currentTrackId = null;
+        let isFirstRun = true;
+
+        async function fetchNowPlaying() {
+            if (!accessToken || Date.now() > tokenExpiry) {
+                if (!(await getAccessToken())) return;
+            }
+            try {
+                // ★修正: 公式URL
+                const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', { headers: { 'Authorization': `Bearer ${accessToken}` } });
+                
+                if (res.status === 204) { playerCard.classList.add('hidden'); return; }
+                if (res.status > 400) return;
+
+                const data = await res.json();
+                const track = data.item;
+                if(!track) { playerCard.classList.add('hidden'); return; }
+
+                if(playerCard.classList.contains('hidden')) playerCard.classList.remove('hidden');
+                
+                if(isFirstRun) {
+                    clearTimeout(timeoutTimer);
+                    document.getElementById('trackTitle').innerText = ""; 
+                    document.getElementById('trackArtist').innerText = "";
+                    isFirstRun = false;
+                }
+
+                if (currentTrackId !== track.id) {
+                    currentTrackId = track.id;
+                    playerCard.classList.remove('entering');
+                    playerCard.classList.add('exiting');
+                    
+                    setTimeout(() => {
+                        const titleEl = document.getElementById('trackTitle');
+                        const artistEl = document.getElementById('trackArtist');
+                        titleEl.innerText = track.name;
+                        
+                        if(track.artists && track.artists.length > 0) {
+                            artistEl.innerText = track.artists.map(a => a.name).join(', ');
+                        } else {
+                            artistEl.innerText = "";
+                        }
+                        
+                        // ★修正: スクロール判定を確実に実行
+                        requestAnimationFrame(() => {
+                            applyMarquee(titleEl, document.getElementById('titleContainer'));
+                            applyMarquee(artistEl, document.getElementById('artistContainer'));
+                        });
+
+                        if(track.album && track.album.images && track.album.images.length > 0) {
+                            imgEl.src = track.album.images[0].url; 
+                        } else {
+                            imgEl.src = ""; 
+                            if(isAutoBg) updateBackground(null);
+                        }
+                        
+                        playerCard.classList.remove('exiting');
+                        playerCard.classList.add('preparing');
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                playerCard.classList.remove('preparing');
+                                playerCard.classList.add('entering');
+                            });
+                        });
+                    }, 500);
+                }
+                document.getElementById('currentTime').innerText = msToTime(data.progress_ms);
+                document.getElementById('totalTime').innerText = msToTime(track.duration_ms);
+                const percent = (data.progress_ms / track.duration_ms) * 100;
+                document.getElementById('progressBar').style.width = percent + '%';
+
+            } catch (e) { console.error("Fetch Loop Error:", e); }
+        }
+
+        if(refreshToken) {
+            fetchNowPlaying(); setInterval(fetchNowPlaying, 1000);
+        } else {
+            document.getElementById('trackTitle').innerHTML = "<span class='error-msg'>No Token</span>";
+            document.getElementById('trackArtist').innerText = "Login required";
+        }
+
+        let audioCtx, analyser, dataArray, canvasCtx;
+        let audioInitialized = false;
+        async function initAudio() {
+            if(audioInitialized) return;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioCtx.createMediaStreamSource(stream);
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 64;
+                source.connect(analyser);
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                const cvs = document.getElementById('visualizer');
+                canvasCtx = cvs.getContext('2d');
+                audioInitialized = true;
+                drawVisualizer();
+            } catch(e) { console.log("Audio Init Failed"); }
+        }
+        function drawVisualizer() {
+            requestAnimationFrame(drawVisualizer);
+            analyser.getByteFrequencyData(dataArray);
+            const cvs = document.getElementById('visualizer');
+            canvasCtx.clearRect(0,0,cvs.width,cvs.height);
+            const w = cvs.width / dataArray.length;
+            for(let i=0; i<dataArray.length; i++) {
+                const h = (dataArray[i]/255) * cvs.height;
+                canvasCtx.fillStyle = 'rgba(255,255,255,0.7)';
+                canvasCtx.fillRect(i*w, cvs.height - h, w-1, h);
+            }
+        }
+        window.resumeAudio = function() {
+            if(!audioInitialized) initAudio();
+            if(audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+        };
+        initAudio();
+    </script>
+</body>
+</html>
